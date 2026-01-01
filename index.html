@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>OverlayCam</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        #camera-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        #overlay-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(1) rotate(0deg);
+            cursor: move;
+            touch-action: none;
+            display: none;
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            width: 250px; /* Base width */
+        }
+
+        #overlay-img {
+            display: block;
+            width: 100%;
+            height: auto;
+            pointer-events: none;
+            user-select: none;
+        }
+
+        .controls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 400px;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(12px);
+            padding: 20px;
+            border-radius: 28px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 100;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 6px;
+            background: #444;
+            border-radius: 5px;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 22px;
+            height: 22px;
+            background: #3b82f6;
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid white;
+        }
+
+        .hidden { display: none; }
+        
+        .toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 24px;
+            z-index: 200;
+            display: none;
+            font-size: 14px;
+        }
+
+        /* Guide for the user */
+        .gesture-hint {
+            position: absolute;
+            top: 80px;
+            width: 100%;
+            text-align: center;
+            color: rgba(255,255,255,0.6);
+            font-size: 12px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="toast" class="toast"></div>
+    <div id="hint" class="gesture-hint hidden">Pinch to resize • Two fingers to rotate</div>
+
+    <div id="camera-container">
+        <video id="video" autoplay playsinline muted></video>
+        <div id="overlay-container">
+            <img id="overlay-img" src="" alt="Overlay">
+        </div>
+    </div>
+
+    <div class="controls">
+        <div class="flex justify-between items-center gap-3">
+            <button id="upload-btn" class="bg-blue-600 active:bg-blue-700 text-white px-5 py-2.5 rounded-full text-sm font-bold flex-1 transition-colors">
+                Select Overlay
+            </button>
+            
+            <button id="delete-btn" class="hidden bg-red-500/20 text-red-400 p-2.5 rounded-full border border-red-500/30 active:bg-red-500/40 transition-all">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            </button>
+
+            <button id="flip-btn" class="bg-white/10 text-white p-2.5 rounded-full hover:bg-white/20 active:bg-white/30 transition-all">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+            </button>
+        </div>
+
+        <div id="opacity-control" class="hidden flex flex-col gap-2">
+            <div class="flex justify-between text-white/70 text-xs font-medium px-1 uppercase tracking-wider">
+                <span>Opacity</span>
+                <span id="opacity-val" class="text-blue-400">50%</span>
+            </div>
+            <input type="range" id="opacity-range" min="0" max="100" value="50">
+        </div>
+
+        <input type="file" id="file-input" class="hidden" accept="image/*">
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const overlayContainer = document.getElementById('overlay-container');
+        const overlayImg = document.getElementById('overlay-img');
+        const fileInput = document.getElementById('file-input');
+        const uploadBtn = document.getElementById('upload-btn');
+        const deleteBtn = document.getElementById('delete-btn');
+        const flipBtn = document.getElementById('flip-btn');
+        const opacityRange = document.getElementById('opacity-range');
+        const opacityVal = document.getElementById('opacity-val');
+        const opacityControl = document.getElementById('opacity-control');
+        const toast = document.getElementById('toast');
+        const hint = document.getElementById('hint');
+
+        let currentFacingMode = 'environment';
+        
+        // Transform State
+        let state = {
+            x: 0,
+            y: 0,
+            scale: 1,
+            rotation: 0,
+            lastX: 0,
+            lastY: 0,
+            lastScale: 1,
+            lastRotation: 0
+        };
+
+        // Gesture State
+        let gesture = {
+            isDragging: false,
+            isPinching: false,
+            startX: 0,
+            startY: 0,
+            startDist: 0,
+            startAngle: 0
+        };
+
+        function showToast(msg) {
+            toast.textContent = msg;
+            toast.style.display = 'block';
+            setTimeout(() => { toast.style.display = 'none'; }, 2000);
+        }
+
+        function updateTransform() {
+            // We use translate3d for performance
+            // Note: We're adding the base centering logic into the X/Y state or using translate offset
+            overlayContainer.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale}) rotate(${state.rotation}deg)`;
+        }
+
+        async function startCamera() {
+            try {
+                if (video.srcObject) {
+                    video.srcObject.getTracks().forEach(track => track.stop());
+                }
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: currentFacingMode },
+                    audio: false
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                showToast("Camera access error");
+            }
+        }
+
+        flipBtn.onclick = () => {
+            currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+            startCamera();
+        };
+
+        uploadBtn.onclick = () => fileInput.click();
+
+        fileInput.onchange = (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    overlayImg.src = event.target.result;
+                    overlayContainer.style.display = 'block';
+                    opacityControl.classList.remove('hidden');
+                    deleteBtn.classList.remove('hidden');
+                    hint.classList.remove('hidden');
+                    
+                    // Reset transform state
+                    state = { x: 0, y: 0, scale: 1, rotation: 0, lastX: 0, lastY: 0, lastScale: 1, lastRotation: 0 };
+                    updateTransform();
+                    overlayImg.style.opacity = opacityRange.value / 100;
+                };
+                reader.readAsDataURL(file);
+            }
+        };
+
+        deleteBtn.onclick = () => {
+            overlayContainer.style.display = 'none';
+            opacityControl.classList.add('hidden');
+            deleteBtn.classList.add('hidden');
+            hint.classList.add('hidden');
+            overlayImg.src = "";
+            fileInput.value = "";
+        };
+
+        opacityRange.oninput = (e) => {
+            const val = e.target.value;
+            overlayImg.style.opacity = val / 100;
+            opacityVal.textContent = val + '%';
+        };
+
+        // --- Gesture Helpers ---
+        const getDist = (t1, t2) => Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        const getAngle = (t1, t2) => Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX) * 180 / Math.PI;
+
+        // --- Unified Interaction Logic ---
+        const handleStart = (e) => {
+            if (e.target !== overlayContainer && e.target !== overlayImg) return;
+            e.preventDefault();
+
+            if (e.touches.length === 1) {
+                gesture.isDragging = true;
+                gesture.startX = e.touches[0].clientX;
+                gesture.startY = e.touches[0].clientY;
+                state.lastX = state.x;
+                state.lastY = state.y;
+            } else if (e.touches.length === 2) {
+                gesture.isDragging = false;
+                gesture.isPinching = true;
+                gesture.startDist = getDist(e.touches[0], e.touches[1]);
+                gesture.startAngle = getAngle(e.touches[0], e.touches[1]);
+                state.lastScale = state.scale;
+                state.lastRotation = state.rotation;
+            }
+        };
+
+        const handleMove = (e) => {
+            if (!gesture.isDragging && !gesture.isPinching) return;
+            e.preventDefault();
+
+            if (gesture.isDragging && e.touches.length === 1) {
+                const dx = e.touches[0].clientX - gesture.startX;
+                const dy = e.touches[0].clientY - gesture.startY;
+                state.x = state.lastX + dx;
+                state.y = state.lastY + dy;
+            } else if (gesture.isPinching && e.touches.length === 2) {
+                // Scaling
+                const currentDist = getDist(e.touches[0], e.touches[1]);
+                const ratio = currentDist / gesture.startDist;
+                state.scale = Math.max(0.1, state.lastScale * ratio);
+
+                // Rotation
+                const currentAngle = getAngle(e.touches[0], e.touches[1]);
+                const da = currentAngle - gesture.startAngle;
+                state.rotation = state.lastRotation + da;
+            }
+            updateTransform();
+        };
+
+        const handleEnd = () => {
+            gesture.isDragging = false;
+            gesture.isPinching = false;
+        };
+
+        // Listeners
+        window.addEventListener('touchstart', handleStart, { passive: false });
+        window.addEventListener('touchmove', handleMove, { passive: false });
+        window.addEventListener('touchend', handleEnd);
+
+        // Simple mouse support for dragging
+        let isMouseDown = false;
+        overlayContainer.onmousedown = (e) => {
+            isMouseDown = true;
+            gesture.startX = e.clientX;
+            gesture.startY = e.clientY;
+            state.lastX = state.x;
+            state.lastY = state.y;
+        };
+        window.onmousemove = (e) => {
+            if (!isMouseDown) return;
+            state.x = state.lastX + (e.clientX - gesture.startX);
+            state.y = state.lastY + (e.clientY - gesture.startY);
+            updateTransform();
+        };
+        window.onmouseup = () => isMouseDown = false;
+
+        window.onload = startCamera;
+    </script>
+</body>
+</html>
