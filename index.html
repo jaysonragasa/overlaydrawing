@@ -41,7 +41,7 @@
             touch-action: none;
             display: none;
             border: 2px dashed rgba(255, 255, 255, 0.3);
-            width: 250px; /* Base width */
+            width: 250px;
         }
 
         #overlay-img {
@@ -50,6 +50,12 @@
             height: auto;
             pointer-events: none;
             user-select: none;
+            transition: filter 0.3s ease;
+        }
+
+        /* Combined Artistic Filter: Line Art + B&W + Cartoon Boldness */
+        .filter-artistic { 
+            filter: grayscale(100%) contrast(800%) brightness(120%) !important; 
         }
 
         .controls {
@@ -58,7 +64,7 @@
             left: 50%;
             transform: translateX(-50%);
             width: 90%;
-            max-width: 400px;
+            max-width: 440px;
             background: rgba(0, 0, 0, 0.75);
             backdrop-filter: blur(12px);
             padding: 20px;
@@ -106,7 +112,6 @@
             font-size: 14px;
         }
 
-        /* Guide for the user */
         .gesture-hint {
             position: absolute;
             top: 80px;
@@ -115,6 +120,11 @@
             color: rgba(255,255,255,0.6);
             font-size: 12px;
             pointer-events: none;
+        }
+
+        .btn-active {
+            background-color: #3b82f6 !important;
+            color: white !important;
         }
     </style>
 </head>
@@ -131,9 +141,14 @@
     </div>
 
     <div class="controls">
-        <div class="flex justify-between items-center gap-3">
+        <div class="flex justify-between items-center gap-2">
             <button id="upload-btn" class="bg-blue-600 active:bg-blue-700 text-white px-5 py-2.5 rounded-full text-sm font-bold flex-1 transition-colors">
                 Select Overlay
+            </button>
+
+            <!-- Toggle Artistic Filter -->
+            <button id="filter-btn" class="hidden bg-white/10 text-white p-2.5 rounded-full hover:bg-white/20 active:bg-white/30 transition-all" title="Toggle Artistic Mode">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
             </button>
             
             <button id="delete-btn" class="hidden bg-red-500/20 text-red-400 p-2.5 rounded-full border border-red-500/30 active:bg-red-500/40 transition-all">
@@ -163,6 +178,7 @@
         const fileInput = document.getElementById('file-input');
         const uploadBtn = document.getElementById('upload-btn');
         const deleteBtn = document.getElementById('delete-btn');
+        const filterBtn = document.getElementById('filter-btn');
         const flipBtn = document.getElementById('flip-btn');
         const opacityRange = document.getElementById('opacity-range');
         const opacityVal = document.getElementById('opacity-val');
@@ -171,28 +187,16 @@
         const hint = document.getElementById('hint');
 
         let currentFacingMode = 'environment';
+        let artisticFilterOn = false;
         
         // Transform State
         let state = {
-            x: 0,
-            y: 0,
-            scale: 1,
-            rotation: 0,
-            lastX: 0,
-            lastY: 0,
-            lastScale: 1,
-            lastRotation: 0
+            x: 0, y: 0, scale: 1, rotation: 0,
+            lastX: 0, lastY: 0, lastScale: 1, lastRotation: 0
         };
 
         // Gesture State
-        let gesture = {
-            isDragging: false,
-            isPinching: false,
-            startX: 0,
-            startY: 0,
-            startDist: 0,
-            startAngle: 0
-        };
+        let gesture = { isDragging: false, isPinching: false, startX: 0, startY: 0, startDist: 0, startAngle: 0 };
 
         function showToast(msg) {
             toast.textContent = msg;
@@ -201,8 +205,6 @@
         }
 
         function updateTransform() {
-            // We use translate3d for performance
-            // Note: We're adding the base centering logic into the X/Y state or using translate offset
             overlayContainer.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale}) rotate(${state.rotation}deg)`;
         }
 
@@ -237,11 +239,16 @@
                     overlayContainer.style.display = 'block';
                     opacityControl.classList.remove('hidden');
                     deleteBtn.classList.remove('hidden');
+                    filterBtn.classList.remove('hidden');
                     hint.classList.remove('hidden');
                     
-                    // Reset transform state
                     state = { x: 0, y: 0, scale: 1, rotation: 0, lastX: 0, lastY: 0, lastScale: 1, lastRotation: 0 };
                     updateTransform();
+                    
+                    artisticFilterOn = false;
+                    overlayImg.classList.remove('filter-artistic');
+                    filterBtn.classList.remove('btn-active');
+                    
                     overlayImg.style.opacity = opacityRange.value / 100;
                 };
                 reader.readAsDataURL(file);
@@ -252,9 +259,23 @@
             overlayContainer.style.display = 'none';
             opacityControl.classList.add('hidden');
             deleteBtn.classList.add('hidden');
+            filterBtn.classList.add('hidden');
             hint.classList.add('hidden');
             overlayImg.src = "";
             fileInput.value = "";
+        };
+
+        filterBtn.onclick = () => {
+            artisticFilterOn = !artisticFilterOn;
+            if (artisticFilterOn) {
+                overlayImg.classList.add('filter-artistic');
+                filterBtn.classList.add('btn-active');
+                showToast("Sketch Mode Enabled");
+            } else {
+                overlayImg.classList.remove('filter-artistic');
+                filterBtn.classList.remove('btn-active');
+                showToast("Normal Mode");
+            }
         };
 
         opacityRange.oninput = (e) => {
@@ -263,11 +284,10 @@
             opacityVal.textContent = val + '%';
         };
 
-        // --- Gesture Helpers ---
+        // --- Interaction Logic ---
         const getDist = (t1, t2) => Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
         const getAngle = (t1, t2) => Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX) * 180 / Math.PI;
 
-        // --- Unified Interaction Logic ---
         const handleStart = (e) => {
             if (e.target !== overlayContainer && e.target !== overlayImg) return;
             e.preventDefault();
@@ -293,42 +313,28 @@
             e.preventDefault();
 
             if (gesture.isDragging && e.touches.length === 1) {
-                const dx = e.touches[0].clientX - gesture.startX;
-                const dy = e.touches[0].clientY - gesture.startY;
-                state.x = state.lastX + dx;
-                state.y = state.lastY + dy;
+                state.x = state.lastX + (e.touches[0].clientX - gesture.startX);
+                state.y = state.lastY + (e.touches[0].clientY - gesture.startY);
             } else if (gesture.isPinching && e.touches.length === 2) {
-                // Scaling
-                const currentDist = getDist(e.touches[0], e.touches[1]);
-                const ratio = currentDist / gesture.startDist;
+                const ratio = getDist(e.touches[0], e.touches[1]) / gesture.startDist;
                 state.scale = Math.max(0.1, state.lastScale * ratio);
-
-                // Rotation
-                const currentAngle = getAngle(e.touches[0], e.touches[1]);
-                const da = currentAngle - gesture.startAngle;
-                state.rotation = state.lastRotation + da;
+                state.rotation = state.lastRotation + (getAngle(e.touches[0], e.touches[1]) - gesture.startAngle);
             }
             updateTransform();
         };
 
-        const handleEnd = () => {
-            gesture.isDragging = false;
-            gesture.isPinching = false;
-        };
+        const handleEnd = () => { gesture.isDragging = false; gesture.isPinching = false; };
 
-        // Listeners
         window.addEventListener('touchstart', handleStart, { passive: false });
         window.addEventListener('touchmove', handleMove, { passive: false });
         window.addEventListener('touchend', handleEnd);
 
-        // Simple mouse support for dragging
+        // Mouse Support
         let isMouseDown = false;
         overlayContainer.onmousedown = (e) => {
             isMouseDown = true;
-            gesture.startX = e.clientX;
-            gesture.startY = e.clientY;
-            state.lastX = state.x;
-            state.lastY = state.y;
+            gesture.startX = e.clientX; gesture.startY = e.clientY;
+            state.lastX = state.x; state.lastY = state.y;
         };
         window.onmousemove = (e) => {
             if (!isMouseDown) return;
